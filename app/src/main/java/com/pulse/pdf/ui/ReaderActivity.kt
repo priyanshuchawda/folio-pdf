@@ -4,6 +4,8 @@ import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.View
@@ -47,6 +49,8 @@ class ReaderActivity : AppCompatActivity(),
     private var chromeVisible = true
     private var pageCount = 0
     private var currentPage = 0
+    private val chromeHandler = Handler(Looper.getMainLooper())
+    private val hideChromeRunnable = Runnable { setChromeVisible(false) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,16 +76,18 @@ class ReaderActivity : AppCompatActivity(),
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.pageLabel.setOnClickListener {
             wakeGuard.onUserInteraction()
+            cancelChromeAutoHide()
             showGoToPageDialog()
-        }
-        binding.pdfView.setOnClickListener {
-            wakeGuard.onUserInteraction()
-            setChromeVisible(!chromeVisible)
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (!chromeVisible) setChromeVisible(true) else finish()
+                if (!chromeVisible) {
+                    setChromeVisible(true)
+                    scheduleChromeAutoHide()
+                } else {
+                    finish()
+                }
             }
         })
 
@@ -143,10 +149,18 @@ class ReaderActivity : AppCompatActivity(),
             .onPageError(this)
             .onTap {
                 wakeGuard.onUserInteraction()
-                setChromeVisible(!chromeVisible)
+                if (chromeVisible) {
+                    setChromeVisible(false)
+                } else {
+                    setChromeVisible(true)
+                    scheduleChromeAutoHide()
+                }
                 true
             }
-            .onPageScroll { _, _ -> wakeGuard.onUserInteraction() }
+            .onPageScroll { _, _ ->
+                wakeGuard.onUserInteraction()
+                if (chromeVisible) setChromeVisible(false)
+            }
             .load()
     }
 
@@ -159,7 +173,8 @@ class ReaderActivity : AppCompatActivity(),
         binding.pdfView.post {
             binding.pdfView.setPositionOffset(binding.pdfView.positionOffset, true)
         }
-        enterImmersive()
+        setChromeVisible(true)
+        scheduleChromeAutoHide(CHROME_HIDE_AFTER_LOAD_MS)
     }
 
     override fun onPageChanged(page: Int, pageCount: Int) {
@@ -188,7 +203,7 @@ class ReaderActivity : AppCompatActivity(),
     private fun showGoToPageDialog() {
         if (pageCount <= 0) return
         setChromeVisible(true)
-        exitImmersive()
+        cancelChromeAutoHide()
 
         val pad = (16 * resources.displayMetrics.density).toInt()
         val input = EditText(this).apply {
@@ -228,6 +243,9 @@ class ReaderActivity : AppCompatActivity(),
             }
         }
 
+        dialog.setOnDismissListener {
+            setChromeVisible(false)
+        }
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
         dialog.setOnShowListener { input.requestFocus() }
         dialog.show()
@@ -252,11 +270,21 @@ class ReaderActivity : AppCompatActivity(),
     }
 
     private fun setChromeVisible(visible: Boolean) {
+        if (!visible) cancelChromeAutoHide()
         chromeVisible = visible
         val v = if (visible) View.VISIBLE else View.GONE
         binding.topBar.visibility = v
         binding.bottomBar.visibility = v
         if (visible) exitImmersive() else enterImmersive()
+    }
+
+    private fun scheduleChromeAutoHide(delayMs: Long = CHROME_AUTO_HIDE_MS) {
+        cancelChromeAutoHide()
+        chromeHandler.postDelayed(hideChromeRunnable, delayMs)
+    }
+
+    private fun cancelChromeAutoHide() {
+        chromeHandler.removeCallbacks(hideChromeRunnable)
     }
 
     private fun enterImmersive() {
@@ -303,6 +331,7 @@ class ReaderActivity : AppCompatActivity(),
     }
 
     override fun onDestroy() {
+        cancelChromeAutoHide()
         wakeGuard.dispose()
         super.onDestroy()
     }
@@ -316,6 +345,8 @@ class ReaderActivity : AppCompatActivity(),
 
     companion object {
         const val EXTRA_URI = "uri"
+        private const val CHROME_AUTO_HIDE_MS = 2_500L
+        private const val CHROME_HIDE_AFTER_LOAD_MS = 1_800L
 
         fun open(context: android.content.Context, uri: Uri) {
             context.startActivity(
