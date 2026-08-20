@@ -15,7 +15,7 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://folio-pdf.vercel.app"),
+  metadataBase: new URL("https://folio-pdf-seven.vercel.app"),
   title: {
     default: "Folio — Lite PDF for tablets",
     template: "%s · Folio",
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     description:
       "Fast 1000+ page reading on Fire HD–class devices. Download the Android APK.",
     type: "website",
-    url: "https://folio-pdf.vercel.app",
+    url: "https://folio-pdf-seven.vercel.app",
   },
   twitter: {
     card: "summary_large_image",

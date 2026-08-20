@@ -10,6 +10,7 @@ AUTHOR_NAME="${AUTHOR_NAME:-priyanshuchawda}"
 AUTHOR_EMAIL="${AUTHOR_EMAIL:-priyanshuchawda@users.noreply.github.com}"
 BRANCH="${BRANCH:-main}"
 VISIBILITY="${VISIBILITY:-public}" # public|private
+HOMEPAGE="${HOMEPAGE:-https://folio-pdf-seven.vercel.app}"
 
 export GIT_AUTHOR_NAME="$AUTHOR_NAME"
 export GIT_AUTHOR_EMAIL="$AUTHOR_EMAIL"
@@ -74,7 +75,7 @@ git push -u origin "HEAD:${BRANCH}"
 # Keep GitHub About box in sync (non-fatal if offline/permissions differ)
 gh repo edit "${AUTHOR_NAME}/${REPO_NAME}" \
   --description "$REPO_DESC" \
-  --homepage "https://github.com/${AUTHOR_NAME}/${REPO_NAME}/releases/latest" \
+  --homepage "$HOMEPAGE" \
   --add-topic android \
   --add-topic pdf \
   --add-topic pdf-reader \

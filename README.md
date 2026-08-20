@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/Android-8.0%2B-green.svg?style=flat-square)](https://github.com/priyanshuchawda/folio-pdf/releases)
 
 **Download latest APK:** [Releases →](https://github.com/priyanshuchawda/folio-pdf/releases/latest)  
-**Website:** [folio-pdf.vercel.app](https://folio-pdf.vercel.app) (or the URL printed by `vercel`)
+**Website:** [folio-pdf-seven.vercel.app](https://folio-pdf-seven.vercel.app)
 
 ---
 
