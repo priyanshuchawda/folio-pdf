@@ -5,9 +5,15 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.text.InputType
 import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -70,6 +76,10 @@ class ReaderActivity : AppCompatActivity(),
         binding.btnNext.setOnClickListener {
             wakeGuard.onUserInteraction()
             if (currentPage < pageCount - 1) binding.pdfView.jumpTo(currentPage + 1, true)
+        }
+        binding.pageLabel.setOnClickListener {
+            wakeGuard.onUserInteraction()
+            showGoToPageDialog()
         }
         binding.pdfView.setOnClickListener {
             wakeGuard.onUserInteraction()
@@ -167,9 +177,76 @@ class ReaderActivity : AppCompatActivity(),
     }
 
     private fun updatePageLabel(position: Int) {
-        binding.pageLabel.text = getString(R.string.page_of, position + 1, pageCount)
+        binding.pageLabel.text = getString(R.string.page_of_hint, position + 1, pageCount)
         binding.btnPrev.isEnabled = position > 0
         binding.btnNext.isEnabled = position < pageCount - 1
+    }
+
+    /** Tap page number → type destination and jump (Drive-style). */
+    private fun showGoToPageDialog() {
+        if (pageCount <= 0) return
+        setChromeVisible(true)
+        exitImmersive()
+
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            imeOptions = EditorInfo.IME_ACTION_GO
+            hint = getString(R.string.go_to_page_hint, pageCount)
+            setText((currentPage + 1).toString())
+            setSelectAllOnFocus(true)
+            setPadding(pad, pad, pad, pad)
+        }
+        val container = FrameLayout(this).apply {
+            addView(
+                input,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { setMargins(pad, pad / 2, pad, 0) },
+            )
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.go_to_page_title)
+            .setView(container)
+            .setPositiveButton(R.string.go_to_page_action) { _, _ ->
+                jumpToTypedPage(input.text?.toString())
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_GO) {
+                jumpToTypedPage(input.text?.toString())
+                dialog.dismiss()
+                true
+            } else {
+                false
+            }
+        }
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.setOnShowListener { input.requestFocus() }
+        dialog.show()
+    }
+
+    private fun jumpToTypedPage(raw: String?) {
+        val target = raw?.trim()?.toIntOrNull()
+        if (target == null || target < 1 || target > pageCount) {
+            Toast.makeText(
+                this,
+                getString(R.string.go_to_page_invalid, pageCount),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        val index = target - 1
+        binding.pdfView.jumpTo(index, true)
+        currentPage = index
+        updatePageLabel(index)
+        docUri?.let { recents.updatePage(it, index) }
+        wakeGuard.onUserInteraction()
     }
 
     private fun setChromeVisible(visible: Boolean) {

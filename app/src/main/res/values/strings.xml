@@ -6,6 +6,11 @@
     <string name="open_sample">Sample</string>
     <string name="empty_library">No recent files.\nTap Open PDF to start reading.</string>
     <string name="page_of">%1$d / %2$d</string>
+    <string name="page_of_hint">%1$d / %2$d  ·  tap to go</string>
+    <string name="go_to_page_title">Go to page</string>
+    <string name="go_to_page_hint">1 – %1$d</string>
+    <string name="go_to_page_action">Go</string>
+    <string name="go_to_page_invalid">Enter a page between 1 and %1$d</string>
     <string name="page_resume">Resume page %1$d</string>
     <string name="prev">Prev</string>
     <string name="next">Next</string>
