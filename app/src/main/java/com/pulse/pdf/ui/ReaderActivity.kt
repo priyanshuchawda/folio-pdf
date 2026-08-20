@@ -1,13 +1,11 @@
 package com.pulse.pdf.ui
 
 import android.content.Intent
-import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.View
 import android.view.WindowManager
@@ -29,6 +27,7 @@ import com.github.barteksc.pdfviewer.listener.OnPageErrorListener
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import com.pulse.pdf.R
 import com.pulse.pdf.databinding.ActivityReaderBinding
+import com.pulse.pdf.util.DocUri
 import com.pulse.pdf.util.RecentStore
 import com.pulse.pdf.util.ScreenWakeGuard
 import java.io.File
@@ -36,6 +35,7 @@ import java.io.File
 /**
  * Pdfium-backed reader (same native engine family as Chrome / Drive).
  * Vertical continuous scroll, lazy page decode — fast on 1000+ page docs.
+ * Tuned for low-RAM tablets; opens Telegram / Drive content URIs safely.
  */
 class ReaderActivity : AppCompatActivity(),
     OnPageChangeListener,
@@ -74,7 +74,8 @@ class ReaderActivity : AppCompatActivity(),
 
         wakeGuard = ScreenWakeGuard(this)
         recents = RecentStore(this)
-        window.attributes = window.attributes.apply { screenBrightness = 0.42f }
+        // Dim LCD a bit — big battery win on Fire HD-class tablets.
+        window.attributes = window.attributes.apply { screenBrightness = 0.40f }
 
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.pageLabel.setOnClickListener {
@@ -95,13 +96,11 @@ class ReaderActivity : AppCompatActivity(),
             }
         })
 
-        val uri = intent?.data
-            ?: intent?.getParcelableExtra<Uri>(EXTRA_URI)
-            ?: run {
-                Toast.makeText(this, R.string.no_document, Toast.LENGTH_SHORT).show()
-                finish()
-                return
-            }
+        val uri = DocUri.fromIntent(intent) ?: run {
+            Toast.makeText(this, R.string.no_document, Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
         openDocument(uri)
     }
 
@@ -113,48 +112,50 @@ class ReaderActivity : AppCompatActivity(),
                 Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         } catch (_: SecurityException) {
+            // Telegram / many providers grant only for this session — fine.
         }
 
-        val name = queryName(uri) ?: getString(R.string.app_name)
+        val name = DocUri.displayName(this, uri) ?: getString(R.string.app_name)
         binding.toolbar.title = name
         recents.touch(uri, name)
         val startPage = recents.list().firstOrNull { it.uri == uri.toString() }?.lastPage ?: 0
 
         binding.loading.visibility = View.VISIBLE
-        // Block scroll-hide until the post-load auto-hide timer owns it.
         suppressScrollHideUntil = SystemClock.uptimeMillis() + 60_000L
-        // Prefer File for file:// (ContentResolver often hits EACCES on scoped storage).
-        val loader = if (uri.scheme == "file") {
-            val path = uri.path
-            if (path.isNullOrBlank()) {
-                onError(IllegalArgumentException("empty file path"))
-                return
-            }
-            binding.pdfView.fromFile(File(path))
-        } else {
-            binding.pdfView.fromUri(uri)
+
+        if (!binding.pdfView.isRecycled) {
+            binding.pdfView.recycle()
         }
+
+        val loader = try {
+            buildLoader(uri, name)
+        } catch (t: Throwable) {
+            onError(t)
+            return
+        }
+
         loader
             .defaultPage(startPage.coerceAtLeast(0))
             .enableSwipe(true)
-            .swipeHorizontal(false) // vertical: scroll down through pages
+            .swipeHorizontal(false)
             .enableDoubletap(true)
             .enableAnnotationRendering(false)
+            .enableAntialiasing(true)
             .password(null)
             .scrollHandle(FolioScrollHandle(this))
-            .spacing(8)
+            .spacing(6)
             .autoSpacing(false)
             .pageFitPolicy(FitPolicy.WIDTH)
             .fitEachPage(true)
             .pageSnap(false)
             .pageFling(false)
             .nightMode(false)
+            .disableLongpress()
             .onLoad(this)
             .onPageChange(this)
             .onError(this)
             .onPageError(this)
             .onTap {
-                // Library tap callback — more reliable than OnTouchListener (load() may replace it).
                 wakeGuard.onUserInteraction()
                 toggleChromeFromTap()
                 true
@@ -165,14 +166,38 @@ class ReaderActivity : AppCompatActivity(),
                 if (chromeVisible) setChromeVisible(false)
             }
             .load()
+
+        // RGB_565 bitmaps (default) — half the RAM of ARGB_8888 on large pages.
+        binding.pdfView.useBestQuality(false)
     }
+
+    /**
+     * Prefer direct Uri / File (no copy). If Telegram's provider won't give a
+     * seekable FD, stream once into cache and open from file.
+     */
+    private fun buildLoader(uri: Uri, displayName: String) =
+        when {
+            uri.scheme == "file" -> {
+                val path = uri.path
+                if (path.isNullOrBlank()) error("empty file path")
+                binding.pdfView.fromFile(File(path))
+            }
+            uri.scheme == "content" && DocUri.canOpenFd(this, uri) -> {
+                binding.pdfView.fromUri(uri)
+            }
+            uri.scheme == "content" -> {
+                DocUri.trimCache(this)
+                val cached = DocUri.cacheCopy(this, uri, displayName)
+                binding.pdfView.fromFile(cached)
+            }
+            else -> binding.pdfView.fromUri(uri)
+        }
 
     override fun loadComplete(nbPages: Int) {
         pageCount = nbPages
         binding.loading.visibility = View.GONE
         updatePageLabel(binding.pdfView.currentPage)
         wakeGuard.onUserInteraction()
-        // Nudge scrollbar so users see the Drive-style scrubber immediately
         binding.pdfView.post {
             binding.pdfView.setPositionOffset(binding.pdfView.positionOffset, true)
         }
@@ -203,7 +228,6 @@ class ReaderActivity : AppCompatActivity(),
         binding.pageLabel.text = getString(R.string.page_of_hint, position + 1, pageCount)
     }
 
-    /** Tap page number → type destination and jump (Drive-style). */
     private fun showGoToPageDialog() {
         if (pageCount <= 0) return
         setChromeVisible(true)
@@ -247,9 +271,7 @@ class ReaderActivity : AppCompatActivity(),
             }
         }
 
-        dialog.setOnDismissListener {
-            setChromeVisible(false)
-        }
+        dialog.setOnDismissListener { setChromeVisible(false) }
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
         dialog.setOnShowListener { input.requestFocus() }
         dialog.show()
@@ -314,20 +336,6 @@ class ReaderActivity : AppCompatActivity(),
             .show(WindowInsetsCompat.Type.systemBars())
     }
 
-    private fun queryName(uri: Uri): String? {
-        var name: String? = null
-        if (uri.scheme == "content") {
-            val c: Cursor? = contentResolver.query(uri, null, null, null, null)
-            c?.use {
-                if (it.moveToFirst()) {
-                    val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) name = it.getString(idx)
-                }
-            }
-        }
-        return name ?: uri.lastPathSegment
-    }
-
     override fun onUserInteraction() {
         super.onUserInteraction()
         wakeGuard.onUserInteraction()
@@ -347,13 +355,16 @@ class ReaderActivity : AppCompatActivity(),
     override fun onDestroy() {
         cancelChromeAutoHide()
         wakeGuard.dispose()
+        if (::binding.isInitialized && !binding.pdfView.isRecycled) {
+            binding.pdfView.recycle()
+        }
         super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val uri = intent.data ?: intent.getParcelableExtra<Uri>(EXTRA_URI) ?: return
+        val uri = DocUri.fromIntent(intent) ?: return
         openDocument(uri)
     }
 

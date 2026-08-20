@@ -11,7 +11,7 @@ import android.view.WindowManager
  */
 class ScreenWakeGuard(
     private val activity: Activity,
-    private val idleMs: Long = 45_000L,
+    private val idleMs: Long = 30_000L,
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var held = false
