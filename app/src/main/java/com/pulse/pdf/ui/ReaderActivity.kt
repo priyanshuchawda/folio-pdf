@@ -179,7 +179,6 @@ class ReaderActivity : AppCompatActivity(),
         suppressScrollHideUntil = SystemClock.uptimeMillis() + CHROME_HIDE_AFTER_LOAD_MS + 500
         setChromeVisible(true)
         scheduleChromeAutoHide(CHROME_HIDE_AFTER_LOAD_MS)
-        android.util.Log.i("Folio", "loadComplete pages=$nbPages chrome scheduled hide")
     }
 
     override fun onPageChanged(page: Int, pageCount: Int) {
@@ -291,7 +290,6 @@ class ReaderActivity : AppCompatActivity(),
         binding.topBar.visibility = v
         binding.bottomBar.visibility = v
         if (visible) exitImmersive() else enterImmersive()
-        android.util.Log.i("Folio", "chromeVisible=$visible topVis=${binding.topBar.visibility}")
     }
 
     private fun scheduleChromeAutoHide(delayMs: Long = CHROME_AUTO_HIDE_MS) {
