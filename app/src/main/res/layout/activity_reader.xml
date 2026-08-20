@@ -6,13 +6,21 @@
     android:layout_height="match_parent"
     android:background="#111111">
 
-    <!-- Continuous vertical scroll (top → bottom), not left/right paging -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/pageList"
+    <!-- Pdfium-backed viewer (same engine family as Chrome / Drive) -->
+    <com.github.barteksc.pdfviewer.PDFView
+        android:id="@+id/pdfView"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:clipToPadding="false"
-        android:overScrollMode="never"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <ProgressBar
+        android:id="@+id/loading"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:indeterminate="true"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

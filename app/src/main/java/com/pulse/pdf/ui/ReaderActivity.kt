@@ -13,24 +13,33 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.pulse.pdf.PdfSession
+import com.github.barteksc.pdfviewer.listener.OnErrorListener
+import com.github.barteksc.pdfviewer.listener.OnLoadCompleteListener
+import com.github.barteksc.pdfviewer.listener.OnPageChangeListener
+import com.github.barteksc.pdfviewer.listener.OnPageErrorListener
+import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
+import com.github.barteksc.pdfviewer.util.FitPolicy
 import com.pulse.pdf.R
 import com.pulse.pdf.databinding.ActivityReaderBinding
-import com.pulse.pdf.pdf.PdfDocumentSession
 import com.pulse.pdf.util.RecentStore
 import com.pulse.pdf.util.ScreenWakeGuard
 
-class ReaderActivity : AppCompatActivity() {
+/**
+ * Pdfium-backed reader (same native engine family as Chrome / Drive).
+ * Vertical continuous scroll, lazy page decode — fast on 1000+ page docs.
+ */
+class ReaderActivity : AppCompatActivity(),
+    OnPageChangeListener,
+    OnLoadCompleteListener,
+    OnErrorListener,
+    OnPageErrorListener {
 
     private lateinit var binding: ActivityReaderBinding
     private lateinit var wakeGuard: ScreenWakeGuard
     private lateinit var recents: RecentStore
-    private lateinit var layoutManager: LinearLayoutManager
-    private var session: PdfDocumentSession? = null
     private var docUri: Uri? = null
     private var chromeVisible = true
+    private var pageCount = 0
     private var currentPage = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,67 +58,28 @@ class ReaderActivity : AppCompatActivity() {
             v.setPadding(v.paddingLeft, 0, v.paddingRight, bars.bottom)
             insets
         }
+
         wakeGuard = ScreenWakeGuard(this)
         recents = RecentStore(this)
-
-        window.attributes = window.attributes.apply {
-            screenBrightness = 0.42f
-        }
-
-        layoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
-        binding.pageList.layoutManager = layoutManager
-        // Fixed-size rows (uniform page height) = smooth jump-scroll for huge PDFs
-        binding.pageList.setHasFixedSize(true)
-        binding.pageList.setItemViewCacheSize(3)
-        binding.pageList.recycledViewPool.setMaxRecycledViews(0, 4)
-        binding.pageList.itemAnimator = null
+        window.attributes = window.attributes.apply { screenBrightness = 0.42f }
 
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnPrev.setOnClickListener {
             wakeGuard.onUserInteraction()
-            scrollToPage((currentPage - 1).coerceAtLeast(0))
+            if (currentPage > 0) binding.pdfView.jumpTo(currentPage - 1, true)
         }
         binding.btnNext.setOnClickListener {
             wakeGuard.onUserInteraction()
-            val last = (session?.pageCount ?: 1) - 1
-            scrollToPage((currentPage + 1).coerceAtMost(last))
+            if (currentPage < pageCount - 1) binding.pdfView.jumpTo(currentPage + 1, true)
         }
-
-        binding.pageList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-                wakeGuard.onUserInteraction()
-                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    val first = layoutManager.findFirstVisibleItemPosition()
-                    if (first != RecyclerView.NO_POSITION) {
-                        currentPage = first
-                        updatePageLabel(first)
-                        session?.prefetchAround(first)
-                        docUri?.let { recents.updatePage(it, first) }
-                    }
-                }
-            }
-
-            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                if (dy == 0) return
-                wakeGuard.onUserInteraction()
-                val first = layoutManager.findFirstVisibleItemPosition()
-                if (first == RecyclerView.NO_POSITION) return
-                if (first != currentPage) {
-                    currentPage = first
-                    updatePageLabel(first)
-                }
-                // While flinging, only keep nearby renders; cancel the rest
-                session?.prefetchAround(first)
-            }
-        })
+        binding.pdfView.setOnClickListener {
+            wakeGuard.onUserInteraction()
+            setChromeVisible(!chromeVisible)
+        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (!chromeVisible) {
-                    setChromeVisible(true)
-                } else {
-                    finish()
-                }
+                if (!chromeVisible) setChromeVisible(true) else finish()
             }
         })
 
@@ -133,59 +103,70 @@ class ReaderActivity : AppCompatActivity() {
         } catch (_: SecurityException) {
         }
 
-        val pfd = contentResolver.openFileDescriptor(uri, "r")
-            ?: run {
-                Toast.makeText(this, R.string.open_failed, Toast.LENGTH_LONG).show()
-                finish()
-                return
-            }
-
-        val dm = resources.displayMetrics
-        val sess = PdfDocumentSession(
-            pfd = pfd,
-            displayWidthPx = dm.widthPixels,
-            displayHeightPx = dm.heightPixels,
-        )
-        session = sess
-        PdfSession.attach(sess)
-
         val name = queryName(uri) ?: getString(R.string.app_name)
         binding.toolbar.title = name
         recents.touch(uri, name)
-
         val startPage = recents.list().firstOrNull { it.uri == uri.toString() }?.lastPage ?: 0
 
-        // Instant open: seed size from page 0 only (not all 1000+ pages)
-        sess.seedDefaultSize {
-            if (isFinishing || isDestroyed) return@seedDefaultSize
-            val adapter = PageAdapter(
-                session = sess,
-                listWidthPx = dm.widthPixels,
-                onInteract = { wakeGuard.onUserInteraction() },
-                onToggleChrome = { setChromeVisible(!chromeVisible) },
-            )
-            binding.pageList.adapter = adapter
-            val page = startPage.coerceIn(0, (sess.pageCount - 1).coerceAtLeast(0))
-            scrollToPage(page)
-            updatePageLabel(page)
-            sess.prefetchAround(page)
-            wakeGuard.onUserInteraction()
-            enterImmersive()
-        }
+        binding.loading.visibility = View.VISIBLE
+        binding.pdfView.fromUri(uri)
+            .defaultPage(startPage.coerceAtLeast(0))
+            .enableSwipe(true)
+            .swipeHorizontal(false) // vertical: scroll down through pages
+            .enableDoubletap(true)
+            .enableAnnotationRendering(false)
+            .password(null)
+            .scrollHandle(DefaultScrollHandle(this))
+            .spacing(8)
+            .autoSpacing(false)
+            .pageFitPolicy(FitPolicy.WIDTH)
+            .fitEachPage(true)
+            .pageSnap(false)
+            .pageFling(false)
+            .nightMode(false)
+            .onLoad(this)
+            .onPageChange(this)
+            .onError(this)
+            .onPageError(this)
+            .onTap {
+                wakeGuard.onUserInteraction()
+                setChromeVisible(!chromeVisible)
+                true
+            }
+            .onPageScroll { _, _ -> wakeGuard.onUserInteraction() }
+            .load()
     }
 
-    private fun scrollToPage(page: Int) {
+    override fun loadComplete(nbPages: Int) {
+        pageCount = nbPages
+        binding.loading.visibility = View.GONE
+        updatePageLabel(binding.pdfView.currentPage)
+        wakeGuard.onUserInteraction()
+        enterImmersive()
+    }
+
+    override fun onPageChanged(page: Int, pageCount: Int) {
+        this.pageCount = pageCount
         currentPage = page
-        binding.pageList.scrollToPosition(page)
         updatePageLabel(page)
-        session?.prefetchAround(page)
+        wakeGuard.onUserInteraction()
+        docUri?.let { recents.updatePage(it, page) }
+    }
+
+    override fun onError(t: Throwable?) {
+        binding.loading.visibility = View.GONE
+        Toast.makeText(this, R.string.open_failed, Toast.LENGTH_LONG).show()
+        android.util.Log.e("Folio", "pdf open failed", t)
+    }
+
+    override fun onPageError(page: Int, t: Throwable?) {
+        android.util.Log.w("Folio", "page error $page", t)
     }
 
     private fun updatePageLabel(position: Int) {
-        val total = session?.pageCount ?: 0
-        binding.pageLabel.text = getString(R.string.page_of, position + 1, total)
+        binding.pageLabel.text = getString(R.string.page_of, position + 1, pageCount)
         binding.btnPrev.isEnabled = position > 0
-        binding.btnNext.isEnabled = position < total - 1
+        binding.btnNext.isEnabled = position < pageCount - 1
     }
 
     private fun setChromeVisible(visible: Boolean) {
@@ -231,37 +212,24 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         wakeGuard.releaseWake()
-        // Keep nearby pages; only drop far cache so resume stays snappy
-        session?.prefetchAround(currentPage)
         docUri?.let { recents.updatePage(it, currentPage) }
     }
 
     override fun onResume() {
         super.onResume()
         wakeGuard.onUserInteraction()
-        session?.let {
-            it.requestPage(currentPage) { _, _ ->
-                binding.pageList.adapter?.notifyItemChanged(currentPage)
-            }
-            it.prefetchAround(currentPage)
-        }
-    }
-
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
-            session?.trimMemory()
-        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
-            session?.prefetchAround(currentPage)
-        }
     }
 
     override fun onDestroy() {
         wakeGuard.dispose()
-        binding.pageList.adapter = null
-        session?.let { PdfSession.detach(it) }
-        session = null
         super.onDestroy()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val uri = intent.data ?: intent.getParcelableExtra<Uri>(EXTRA_URI) ?: return
+        openDocument(uri)
     }
 
     companion object {
@@ -277,15 +245,5 @@ class ReaderActivity : AppCompatActivity() {
                 },
             )
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        val uri = intent.data ?: intent.getParcelableExtra<Uri>(EXTRA_URI) ?: return
-        binding.pageList.adapter = null
-        session?.let { PdfSession.detach(it) }
-        session = null
-        openDocument(uri)
     }
 }
