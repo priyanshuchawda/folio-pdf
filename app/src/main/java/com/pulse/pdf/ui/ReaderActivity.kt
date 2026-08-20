@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.View
@@ -51,6 +52,8 @@ class ReaderActivity : AppCompatActivity(),
     private var currentPage = 0
     private val chromeHandler = Handler(Looper.getMainLooper())
     private val hideChromeRunnable = Runnable { setChromeVisible(false) }
+    /** Ignore scroll-hide while load/nudge settles so chrome can auto-hide on a timer. */
+    private var suppressScrollHideUntil = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -152,6 +155,7 @@ class ReaderActivity : AppCompatActivity(),
                 if (chromeVisible) {
                     setChromeVisible(false)
                 } else {
+                    suppressScrollHideUntil = SystemClock.uptimeMillis() + 400
                     setChromeVisible(true)
                     scheduleChromeAutoHide()
                 }
@@ -159,6 +163,7 @@ class ReaderActivity : AppCompatActivity(),
             }
             .onPageScroll { _, _ ->
                 wakeGuard.onUserInteraction()
+                if (SystemClock.uptimeMillis() < suppressScrollHideUntil) return@onPageScroll
                 if (chromeVisible) setChromeVisible(false)
             }
             .load()
@@ -169,6 +174,7 @@ class ReaderActivity : AppCompatActivity(),
         binding.loading.visibility = View.GONE
         updatePageLabel(binding.pdfView.currentPage)
         wakeGuard.onUserInteraction()
+        suppressScrollHideUntil = SystemClock.uptimeMillis() + 600
         // Nudge scrollbar so users see the Drive-style scrubber immediately
         binding.pdfView.post {
             binding.pdfView.setPositionOffset(binding.pdfView.positionOffset, true)
