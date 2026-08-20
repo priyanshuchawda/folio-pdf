@@ -20,13 +20,17 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Low-RAM PDF session for vertical continuous scrolling.
- * Pages are rendered to full display width; height follows aspect ratio.
+ * Instant-open PDF session (Google Drive style).
+ *
+ * - Never walks all pages at open (critical for 1000+ page docs)
+ * - Seeds height from page 0 only; assumes uniform pages (normal for textbooks)
+ * - Renders only visible neighbors; cancels stale work while flinging
+ * - RGB_565 cache, width-fit bitmaps for vertical scroll
  */
 class PdfDocumentSession(
     private val pfd: ParcelFileDescriptor,
     private val displayWidthPx: Int,
-    private val displayHeightPx: Int,
+    @Suppress("UNUSED_PARAMETER") private val displayHeightPx: Int,
 ) : Closeable {
 
     private val renderer = PdfRenderer(pfd)
@@ -37,15 +41,16 @@ class PdfDocumentSession(
     private val scope = CoroutineScope(SupervisorJob() + renderDispatcher)
     private val inFlight = ConcurrentHashMap<Int, Job>()
 
-    val pageCount: Int get() = renderer.pageCount
+    val pageCount: Int = renderer.pageCount
 
-    private val pageW = IntArray(pageCount)
-    private val pageH = IntArray(pageCount)
+    /** Default page size from page 0 (or A4-ish fallback). */
+    @Volatile private var defaultW: Int = 612
+    @Volatile private var defaultH: Int = 792
+    @Volatile private var seeded: Boolean = false
 
     private val maxCacheBytes: Int = run {
-        val fromHeap = (Runtime.getRuntime().maxMemory() / 16).toInt()
-        // Vertical list may show ~1.5 pages; keep ~3 RGB_565 pages max
-        min(fromHeap, 6 * 1024 * 1024)
+        val fromHeap = (Runtime.getRuntime().maxMemory() / 12).toInt()
+        min(fromHeap, 8 * 1024 * 1024)
     }
 
     private val cache = object : LruCache<Int, Bitmap>(maxCacheBytes) {
@@ -62,25 +67,33 @@ class PdfDocumentSession(
         }
     }
 
-    /** Load intrinsic page sizes once (for layout heights). */
-    fun loadPageSizes(onDone: () -> Unit) {
+    /**
+     * Seed layout size from page 0 only — O(1) open, then UI can show immediately.
+     * Call once; safe to call again (no-op if already seeded).
+     */
+    fun seedDefaultSize(onDone: () -> Unit) {
+        if (seeded || pageCount <= 0) {
+            onDone()
+            return
+        }
         scope.launch {
-            for (i in 0 until pageCount) {
-                val page = renderer.openPage(i)
-                pageW[i] = page.width
-                pageH[i] = page.height
+            try {
+                val page = renderer.openPage(0)
+                defaultW = page.width.coerceAtLeast(1)
+                defaultH = page.height.coerceAtLeast(1)
                 page.close()
+                seeded = true
+            } catch (e: Exception) {
+                android.util.Log.w("Folio", "seed size failed, using A4 defaults", e)
+                seeded = true
             }
             withContext(Dispatchers.Main.immediate) { onDone() }
         }
     }
 
-    fun pageHeightForWidth(index: Int, widthPx: Int): Int {
-        val w = pageW.getOrElse(index) { 0 }
-        val h = pageH.getOrElse(index) { 0 }
-        if (w <= 0 || h <= 0) {
-            return max(1, (widthPx * 1.414f).roundToInt())
-        }
+    fun pageHeightForWidth(widthPx: Int): Int {
+        val w = defaultW.coerceAtLeast(1)
+        val h = defaultH.coerceAtLeast(1)
         return max(1, (widthPx.toFloat() * h / w).roundToInt())
     }
 
@@ -110,15 +123,30 @@ class PdfDocumentSession(
         job.invokeOnCompletion { inFlight.remove(pageIndex) }
     }
 
-    /** Keep current ± neighbors for vertical scroll. */
+    /**
+     * Prefetch around [center]; cancel only far-away work so flinging
+     * a 1000-page doc does not queue hundreds of renders — but never
+     * cancel the page the user is looking at (or its neighbors).
+     */
     fun prefetchAround(center: Int) {
         val keep = (center - 1..center + 2).filter { it in 0 until pageCount }.toSet()
-        for (i in keep) {
+        val cancelBeyond = 6
+
+        for ((idx, job) in inFlight.toMap()) {
+            if (kotlin.math.abs(idx - center) > cancelBeyond) job.cancel()
+        }
+
+        // Visible first, then neighbors
+        val order = listOf(center, center + 1, center - 1, center + 2)
+            .filter { it in 0 until pageCount }
+        for (i in order) {
             if (getCached(i) == null) requestPage(i) { _, _ -> }
         }
         synchronized(cache) {
             for (k in cache.snapshot().keys.toList()) {
-                if (k !in keep) cache.remove(k)
+                if (k !in keep && kotlin.math.abs(k - center) > cancelBeyond) {
+                    cache.remove(k)
+                }
             }
         }
     }
@@ -127,8 +155,13 @@ class PdfDocumentSession(
         return try {
             val page = renderer.openPage(pageIndex)
             try {
-                // Fit to display WIDTH so pages stack naturally when scrolling down.
-                val scale = (displayWidthPx.toFloat() / page.width).coerceAtMost(1.5f)
+                // Update defaults if this page differs (rare); layout still uses first seed.
+                if (!seeded) {
+                    defaultW = page.width.coerceAtLeast(1)
+                    defaultH = page.height.coerceAtLeast(1)
+                    seeded = true
+                }
+                val scale = (displayWidthPx.toFloat() / page.width).coerceIn(0.25f, 1.5f)
                 val w = max(1, (page.width * scale).roundToInt())
                 val h = max(1, (page.height * scale).roundToInt())
 
@@ -142,6 +175,8 @@ class PdfDocumentSession(
             } finally {
                 page.close()
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("Folio", "render failed page=$pageIndex", e)
             null

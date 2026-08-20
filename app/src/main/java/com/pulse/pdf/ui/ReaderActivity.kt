@@ -58,9 +58,11 @@ class ReaderActivity : AppCompatActivity() {
 
         layoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
         binding.pageList.layoutManager = layoutManager
-        binding.pageList.setHasFixedSize(false)
-        binding.pageList.setItemViewCacheSize(2)
-        binding.pageList.recycledViewPool.setMaxRecycledViews(0, 2)
+        // Fixed-size rows (uniform page height) = smooth jump-scroll for huge PDFs
+        binding.pageList.setHasFixedSize(true)
+        binding.pageList.setItemViewCacheSize(3)
+        binding.pageList.recycledViewPool.setMaxRecycledViews(0, 4)
+        binding.pageList.itemAnimator = null
 
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnPrev.setOnClickListener {
@@ -75,20 +77,29 @@ class ReaderActivity : AppCompatActivity() {
 
         binding.pageList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-                if (newState != RecyclerView.SCROLL_STATE_IDLE) {
-                    wakeGuard.onUserInteraction()
+                wakeGuard.onUserInteraction()
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    val first = layoutManager.findFirstVisibleItemPosition()
+                    if (first != RecyclerView.NO_POSITION) {
+                        currentPage = first
+                        updatePageLabel(first)
+                        session?.prefetchAround(first)
+                        docUri?.let { recents.updatePage(it, first) }
+                    }
                 }
             }
 
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                if (dy != 0) wakeGuard.onUserInteraction()
+                if (dy == 0) return
+                wakeGuard.onUserInteraction()
                 val first = layoutManager.findFirstVisibleItemPosition()
-                if (first != RecyclerView.NO_POSITION && first != currentPage) {
+                if (first == RecyclerView.NO_POSITION) return
+                if (first != currentPage) {
                     currentPage = first
                     updatePageLabel(first)
-                    session?.prefetchAround(first)
-                    docUri?.let { recents.updatePage(it, first) }
                 }
+                // While flinging, only keep nearby renders; cancel the rest
+                session?.prefetchAround(first)
             }
         })
 
@@ -144,7 +155,9 @@ class ReaderActivity : AppCompatActivity() {
 
         val startPage = recents.list().firstOrNull { it.uri == uri.toString() }?.lastPage ?: 0
 
-        sess.loadPageSizes {
+        // Instant open: seed size from page 0 only (not all 1000+ pages)
+        sess.seedDefaultSize {
+            if (isFinishing || isDestroyed) return@seedDefaultSize
             val adapter = PageAdapter(
                 session = sess,
                 listWidthPx = dm.widthPixels,
@@ -218,7 +231,8 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         wakeGuard.releaseWake()
-        session?.trimMemory()
+        // Keep nearby pages; only drop far cache so resume stays snappy
+        session?.prefetchAround(currentPage)
         docUri?.let { recents.updatePage(it, currentPage) }
     }
 
@@ -258,9 +272,20 @@ class ReaderActivity : AppCompatActivity() {
                 Intent(context, ReaderActivity::class.java).apply {
                     data = uri
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     putExtra(EXTRA_URI, uri)
                 },
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val uri = intent.data ?: intent.getParcelableExtra<Uri>(EXTRA_URI) ?: return
+        binding.pageList.adapter = null
+        session?.let { PdfSession.detach(it) }
+        session = null
+        openDocument(uri)
     }
 }
