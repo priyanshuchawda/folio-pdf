@@ -3,12 +3,14 @@ package com.pulse.pdf.ui
 import android.graphics.Bitmap
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
 import com.pulse.pdf.databinding.ItemPageBinding
 import com.pulse.pdf.pdf.PdfDocumentSession
 
 class PageAdapter(
     private val session: PdfDocumentSession,
+    private val listWidthPx: Int,
     private val onInteract: () -> Unit,
     private val onToggleChrome: () -> Unit,
 ) : RecyclerView.Adapter<PageAdapter.PageVH>() {
@@ -36,10 +38,23 @@ class PageAdapter(
 
         fun bind(page: Int) {
             boundPage = page
+            val h = session.pageHeightForWidth(page, listWidthPx)
+            binding.pageImage.layoutParams = binding.pageImage.layoutParams.apply {
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = h
+            }
             binding.pageImage.setImageBitmap(null)
-            binding.pageImage.onInteract = onInteract
-            binding.pageImage.onSingleTap = onToggleChrome
+            binding.pageImage.scaleType = ImageView.ScaleType.FIT_CENTER
             binding.pageProgress.visibility = android.view.View.VISIBLE
+
+            binding.root.setOnClickListener {
+                onInteract()
+                onToggleChrome()
+            }
+            binding.pageImage.setOnClickListener {
+                onInteract()
+                onToggleChrome()
+            }
 
             val cached = session.getCached(page)
             if (cached != null) {
@@ -60,6 +75,8 @@ class PageAdapter(
         fun unbind() {
             boundPage = -1
             binding.pageImage.setImageBitmap(null)
+            binding.root.setOnClickListener(null)
+            binding.pageImage.setOnClickListener(null)
         }
     }
 }

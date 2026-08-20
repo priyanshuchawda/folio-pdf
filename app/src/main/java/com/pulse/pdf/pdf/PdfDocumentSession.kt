@@ -20,12 +20,8 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Fire-HD / low-RAM tuned PDF session.
- *
- * - One dedicated thread for PdfRenderer (API requirement)
- * - Render ARGB_8888 then store RGB_565 in cache (~½ RAM)
- * - Cap scale to screen fit (no oversized bitmaps)
- * - Tiny LRU: current + optional neighbor only
+ * Low-RAM PDF session for vertical continuous scrolling.
+ * Pages are rendered to full display width; height follows aspect ratio.
  */
 class PdfDocumentSession(
     private val pfd: ParcelFileDescriptor,
@@ -35,7 +31,7 @@ class PdfDocumentSession(
 
     private val renderer = PdfRenderer(pfd)
     private val renderExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "pulse-pdf-render").apply { priority = Thread.NORM_PRIORITY - 1 }
+        Thread(r, "folio-pdf-render").apply { priority = Thread.NORM_PRIORITY - 1 }
     }
     private val renderDispatcher = renderExecutor.asCoroutineDispatcher()
     private val scope = CoroutineScope(SupervisorJob() + renderDispatcher)
@@ -43,10 +39,13 @@ class PdfDocumentSession(
 
     val pageCount: Int get() = renderer.pageCount
 
-    /** ~2 full-screen RGB_565 pages on 800×1280 ≈ 4MB; never exceed 1/16 of heap. */
+    private val pageW = IntArray(pageCount)
+    private val pageH = IntArray(pageCount)
+
     private val maxCacheBytes: Int = run {
         val fromHeap = (Runtime.getRuntime().maxMemory() / 16).toInt()
-        min(fromHeap, 5 * 1024 * 1024)
+        // Vertical list may show ~1.5 pages; keep ~3 RGB_565 pages max
+        min(fromHeap, 6 * 1024 * 1024)
     }
 
     private val cache = object : LruCache<Int, Bitmap>(maxCacheBytes) {
@@ -61,6 +60,28 @@ class PdfDocumentSession(
                 oldValue.recycle()
             }
         }
+    }
+
+    /** Load intrinsic page sizes once (for layout heights). */
+    fun loadPageSizes(onDone: () -> Unit) {
+        scope.launch {
+            for (i in 0 until pageCount) {
+                val page = renderer.openPage(i)
+                pageW[i] = page.width
+                pageH[i] = page.height
+                page.close()
+            }
+            withContext(Dispatchers.Main.immediate) { onDone() }
+        }
+    }
+
+    fun pageHeightForWidth(index: Int, widthPx: Int): Int {
+        val w = pageW.getOrElse(index) { 0 }
+        val h = pageH.getOrElse(index) { 0 }
+        if (w <= 0 || h <= 0) {
+            return max(1, (widthPx * 1.414f).roundToInt())
+        }
+        return max(1, (widthPx.toFloat() * h / w).roundToInt())
     }
 
     fun getCached(pageIndex: Int): Bitmap? = synchronized(cache) {
@@ -89,14 +110,13 @@ class PdfDocumentSession(
         job.invokeOnCompletion { inFlight.remove(pageIndex) }
     }
 
-    /** Prefetch at most the next page; drop everything else. */
+    /** Keep current ± neighbors for vertical scroll. */
     fun prefetchAround(center: Int) {
-        val next = center + 1
-        if (next in 0 until pageCount && getCached(next) == null) {
-            requestPage(next) { _, _ -> }
+        val keep = (center - 1..center + 2).filter { it in 0 until pageCount }.toSet()
+        for (i in keep) {
+            if (getCached(i) == null) requestPage(i) { _, _ -> }
         }
         synchronized(cache) {
-            val keep = setOf(center, next).filter { it in 0 until pageCount }.toSet()
             for (k in cache.snapshot().keys.toList()) {
                 if (k !in keep) cache.remove(k)
             }
@@ -107,11 +127,8 @@ class PdfDocumentSession(
         return try {
             val page = renderer.openPage(pageIndex)
             try {
-                // Fit to screen only — zoom is matrix-based, no hi-res bitmap needed.
-                val scale = min(
-                    displayWidthPx.toFloat() / page.width,
-                    displayHeightPx.toFloat() / page.height,
-                ).coerceAtMost(1.25f)
+                // Fit to display WIDTH so pages stack naturally when scrolling down.
+                val scale = (displayWidthPx.toFloat() / page.width).coerceAtMost(1.5f)
                 val w = max(1, (page.width * scale).roundToInt())
                 val h = max(1, (page.height * scale).roundToInt())
 
@@ -119,15 +136,14 @@ class PdfDocumentSession(
                 argb.eraseColor(0xFFFFFFFF.toInt())
                 page.render(argb, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
 
-                // Store half-size config for cache / ImageView.
                 val rgb = argb.copy(Bitmap.Config.RGB_565, false)
                 argb.recycle()
-                rgb ?: return null
+                rgb
             } finally {
                 page.close()
             }
         } catch (e: Exception) {
-            android.util.Log.e("PulsePdf", "render failed page=$pageIndex", e)
+            android.util.Log.e("Folio", "render failed page=$pageIndex", e)
             null
         }
     }

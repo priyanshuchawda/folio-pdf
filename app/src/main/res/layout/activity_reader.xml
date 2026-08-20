@@ -6,10 +6,13 @@
     android:layout_height="match_parent"
     android:background="#111111">
 
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/pager"
+    <!-- Continuous vertical scroll (top → bottom), not left/right paging -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/pageList"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:clipToPadding="false"
+        android:overScrollMode="never"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

@@ -13,7 +13,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.viewpager2.widget.ViewPager2
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.pulse.pdf.PdfSession
 import com.pulse.pdf.R
 import com.pulse.pdf.databinding.ActivityReaderBinding
@@ -26,9 +27,11 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var binding: ActivityReaderBinding
     private lateinit var wakeGuard: ScreenWakeGuard
     private lateinit var recents: RecentStore
+    private lateinit var layoutManager: LinearLayoutManager
     private var session: PdfDocumentSession? = null
     private var docUri: Uri? = null
     private var chromeVisible = true
+    private var currentPage = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,21 +52,45 @@ class ReaderActivity : AppCompatActivity() {
         wakeGuard = ScreenWakeGuard(this)
         recents = RecentStore(this)
 
-        // Dim reading brightness — big LCD battery win on Fire HD-class devices
         window.attributes = window.attributes.apply {
             screenBrightness = 0.42f
         }
 
+        layoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
+        binding.pageList.layoutManager = layoutManager
+        binding.pageList.setHasFixedSize(false)
+        binding.pageList.setItemViewCacheSize(2)
+        binding.pageList.recycledViewPool.setMaxRecycledViews(0, 2)
+
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnPrev.setOnClickListener {
             wakeGuard.onUserInteraction()
-            binding.pager.currentItem = (binding.pager.currentItem - 1).coerceAtLeast(0)
+            scrollToPage((currentPage - 1).coerceAtLeast(0))
         }
         binding.btnNext.setOnClickListener {
             wakeGuard.onUserInteraction()
             val last = (session?.pageCount ?: 1) - 1
-            binding.pager.currentItem = (binding.pager.currentItem + 1).coerceAtMost(last)
+            scrollToPage((currentPage + 1).coerceAtMost(last))
         }
+
+        binding.pageList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState != RecyclerView.SCROLL_STATE_IDLE) {
+                    wakeGuard.onUserInteraction()
+                }
+            }
+
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (dy != 0) wakeGuard.onUserInteraction()
+                val first = layoutManager.findFirstVisibleItemPosition()
+                if (first != RecyclerView.NO_POSITION && first != currentPage) {
+                    currentPage = first
+                    updatePageLabel(first)
+                    session?.prefetchAround(first)
+                    docUri?.let { recents.updatePage(it, first) }
+                }
+            }
+        })
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -93,7 +120,6 @@ class ReaderActivity : AppCompatActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         } catch (_: SecurityException) {
-            // Intent VIEW grants may be temporary — still readable for this session
         }
 
         val pfd = contentResolver.openFileDescriptor(uri, "r")
@@ -118,33 +144,28 @@ class ReaderActivity : AppCompatActivity() {
 
         val startPage = recents.list().firstOrNull { it.uri == uri.toString() }?.lastPage ?: 0
 
-        val adapter = PageAdapter(
-            session = sess,
-            onInteract = { wakeGuard.onUserInteraction() },
-            onToggleChrome = { setChromeVisible(!chromeVisible) },
-        )
-        binding.pager.adapter = adapter
-        // One page ahead max — ViewPager2 defaults waste RAM on low-memory tablets
-        binding.pager.offscreenPageLimit = 1
-        (binding.pager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)?.apply {
-            setItemViewCacheSize(0)
-            recycledViewPool.setMaxRecycledViews(0, 1)
+        sess.loadPageSizes {
+            val adapter = PageAdapter(
+                session = sess,
+                listWidthPx = dm.widthPixels,
+                onInteract = { wakeGuard.onUserInteraction() },
+                onToggleChrome = { setChromeVisible(!chromeVisible) },
+            )
+            binding.pageList.adapter = adapter
+            val page = startPage.coerceIn(0, (sess.pageCount - 1).coerceAtLeast(0))
+            scrollToPage(page)
+            updatePageLabel(page)
+            sess.prefetchAround(page)
+            wakeGuard.onUserInteraction()
+            enterImmersive()
         }
-        binding.pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-            override fun onPageSelected(position: Int) {
-                wakeGuard.onUserInteraction()
-                updatePageLabel(position)
-                sess.prefetchAround(position)
-                docUri?.let { recents.updatePage(it, position) }
-            }
-        })
+    }
 
-        val page = startPage.coerceIn(0, (sess.pageCount - 1).coerceAtLeast(0))
-        binding.pager.setCurrentItem(page, false)
+    private fun scrollToPage(page: Int) {
+        currentPage = page
+        binding.pageList.scrollToPosition(page)
         updatePageLabel(page)
-        sess.prefetchAround(page)
-        wakeGuard.onUserInteraction()
-        enterImmersive()
+        session?.prefetchAround(page)
     }
 
     private fun updatePageLabel(position: Int) {
@@ -197,18 +218,18 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         wakeGuard.releaseWake()
-        // Persist page; drop cached bitmaps while backgrounded
         session?.trimMemory()
-        docUri?.let { recents.updatePage(it, binding.pager.currentItem) }
+        docUri?.let { recents.updatePage(it, currentPage) }
     }
 
     override fun onResume() {
         super.onResume()
         wakeGuard.onUserInteraction()
         session?.let {
-            val p = binding.pager.currentItem
-            it.requestPage(p) { _, _ -> binding.pager.adapter?.notifyItemChanged(p) }
-            it.prefetchAround(p)
+            it.requestPage(currentPage) { _, _ ->
+                binding.pageList.adapter?.notifyItemChanged(currentPage)
+            }
+            it.prefetchAround(currentPage)
         }
     }
 
@@ -217,13 +238,13 @@ class ReaderActivity : AppCompatActivity() {
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             session?.trimMemory()
         } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
-            session?.prefetchAround(binding.pager.currentItem)
+            session?.prefetchAround(currentPage)
         }
     }
 
     override fun onDestroy() {
         wakeGuard.dispose()
-        binding.pager.adapter = null
+        binding.pageList.adapter = null
         session?.let { PdfSession.detach(it) }
         session = null
         super.onDestroy()

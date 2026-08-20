@@ -1,18 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#111111">
+    android:layout_height="wrap_content"
+    android:background="#111111"
+    android:paddingBottom="8dp">
 
-    <com.pulse.pdf.ui.ZoomImageView
+    <ImageView
         android:id="@+id/pageImage"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:contentDescription="@string/page_image" />
+        android:layout_height="wrap_content"
+        android:adjustViewBounds="true"
+        android:contentDescription="@string/page_image"
+        android:scaleType="fitCenter" />
 
     <ProgressBar
         android:id="@+id/pageProgress"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:layout_gravity="center" />
+        android:layout_gravity="center"
+        android:layout_marginTop="48dp" />
 </FrameLayout>
