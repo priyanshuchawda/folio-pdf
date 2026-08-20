@@ -290,8 +290,6 @@ class ReaderActivity : AppCompatActivity(),
         val v = if (visible) View.VISIBLE else View.GONE
         binding.topBar.visibility = v
         binding.bottomBar.visibility = v
-        binding.topBar.bringToFront()
-        binding.bottomBar.bringToFront()
         if (visible) exitImmersive() else enterImmersive()
         android.util.Log.i("Folio", "chromeVisible=$visible topVis=${binding.topBar.visibility}")
     }
