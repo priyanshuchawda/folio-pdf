@@ -20,4 +20,7 @@ web/out/
 web/.vercel/
 web/.env*
 !web/.env.example
+web/test-results/
+web/playwright-report/
+web/blob-report/
 
