@@ -13,3 +13,4 @@
 .cxx/
 *.log
 .externalNativeBuild/
+dist/

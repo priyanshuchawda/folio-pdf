@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Publish Folio (PulsePdf) to GitHub as priyanshuchawda — no interactive git config writes.
 set -euo pipefail
 
@@ -6,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 REPO_NAME="${REPO_NAME:-folio-pdf}"
-REPO_DESC="${REPO_DESC:-Folio — ultra-light PDF reader tuned for low-RAM Android tablets}"
+REPO_DESC="${REPO_DESC:-Folio — ultra-light PDF reader for low-RAM Android tablets (Telegram/Drive, 1000+ pages)}"
 AUTHOR_NAME="${AUTHOR_NAME:-priyanshuchawda}"
 AUTHOR_EMAIL="${AUTHOR_EMAIL:-priyanshuchawda@users.noreply.github.com}"
 BRANCH="${BRANCH:-main}"
@@ -37,7 +36,13 @@ if [[ ! -f .gitignore ]]; then
 *.dex
 *.class
 .cxx/
+dist/
 EOF
+fi
+
+# Keep dist/ out of git even if .gitignore already existed without it
+if ! grep -qxF 'dist/' .gitignore 2>/dev/null; then
+  echo 'dist/' >> .gitignore
 fi
 
 git add -A
@@ -45,9 +50,9 @@ if git diff --cached --quiet; then
   echo "Nothing new to commit."
 else
   git commit --author="${AUTHOR_NAME} <${AUTHOR_EMAIL}>" -m "$(cat <<'EOF'
-Add Folio: lite tablet PDF reader.
+Docs and release packaging for Folio.
 
-RGB_565 page cache, screen-fit render, short wake lock, and low-RAM ViewPager tuning for Fire HD-class devices.
+README, license, and GitHub release helpers for the lite tablet PDF reader.
 EOF
 )"
 fi
@@ -65,4 +70,19 @@ if ! git remote get-url origin >/dev/null 2>&1; then
 fi
 
 git push -u origin "HEAD:${BRANCH}"
+
+# Keep GitHub About box in sync (non-fatal if offline/permissions differ)
+gh repo edit "${AUTHOR_NAME}/${REPO_NAME}" \
+  --description "$REPO_DESC" \
+  --homepage "https://github.com/${AUTHOR_NAME}/${REPO_NAME}/releases/latest" \
+  --add-topic android \
+  --add-topic pdf \
+  --add-topic pdf-reader \
+  --add-topic pdfium \
+  --add-topic tablet \
+  --add-topic fire-tablet \
+  --add-topic kotlin \
+  --add-topic low-ram \
+  >/dev/null 2>&1 || true
+
 echo "Published: https://github.com/${AUTHOR_NAME}/${REPO_NAME}"
