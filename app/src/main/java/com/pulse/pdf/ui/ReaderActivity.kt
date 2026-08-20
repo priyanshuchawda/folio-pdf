@@ -17,7 +17,6 @@ import com.github.barteksc.pdfviewer.listener.OnErrorListener
 import com.github.barteksc.pdfviewer.listener.OnLoadCompleteListener
 import com.github.barteksc.pdfviewer.listener.OnPageChangeListener
 import com.github.barteksc.pdfviewer.listener.OnPageErrorListener
-import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import com.pulse.pdf.R
 import com.pulse.pdf.databinding.ActivityReaderBinding
@@ -116,7 +115,7 @@ class ReaderActivity : AppCompatActivity(),
             .enableDoubletap(true)
             .enableAnnotationRendering(false)
             .password(null)
-            .scrollHandle(DefaultScrollHandle(this))
+            .scrollHandle(FolioScrollHandle(this))
             .spacing(8)
             .autoSpacing(false)
             .pageFitPolicy(FitPolicy.WIDTH)
