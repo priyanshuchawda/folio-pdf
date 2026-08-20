@@ -28,6 +28,7 @@ import com.pulse.pdf.R
 import com.pulse.pdf.databinding.ActivityReaderBinding
 import com.pulse.pdf.util.RecentStore
 import com.pulse.pdf.util.ScreenWakeGuard
+import java.io.File
 
 /**
  * Pdfium-backed reader (same native engine family as Chrome / Drive).
@@ -118,7 +119,18 @@ class ReaderActivity : AppCompatActivity(),
         val startPage = recents.list().firstOrNull { it.uri == uri.toString() }?.lastPage ?: 0
 
         binding.loading.visibility = View.VISIBLE
-        binding.pdfView.fromUri(uri)
+        // Prefer File for file:// (ContentResolver often hits EACCES on scoped storage).
+        val loader = if (uri.scheme == "file") {
+            val path = uri.path
+            if (path.isNullOrBlank()) {
+                onError(IllegalArgumentException("empty file path"))
+                return
+            }
+            binding.pdfView.fromFile(File(path))
+        } else {
+            binding.pdfView.fromUri(uri)
+        }
+        loader
             .defaultPage(startPage.coerceAtLeast(0))
             .enableSwipe(true)
             .swipeHorizontal(false) // vertical: scroll down through pages

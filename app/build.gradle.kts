@@ -21,8 +21,8 @@ android {
         applicationId = "com.pulse.pdf"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.5.3-goto"
+        versionCode = 11
+        versionName = "1.5.4-goto"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a")
