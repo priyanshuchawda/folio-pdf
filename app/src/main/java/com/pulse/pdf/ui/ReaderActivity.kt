@@ -141,6 +141,10 @@ class ReaderActivity : AppCompatActivity(),
         binding.loading.visibility = View.GONE
         updatePageLabel(binding.pdfView.currentPage)
         wakeGuard.onUserInteraction()
+        // Nudge scrollbar so users see the Drive-style scrubber immediately
+        binding.pdfView.post {
+            binding.pdfView.setPositionOffset(binding.pdfView.positionOffset, true)
+        }
         enterImmersive()
     }
 
