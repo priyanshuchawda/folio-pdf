@@ -14,3 +14,10 @@
 *.log
 .externalNativeBuild/
 dist/
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/.env*
+!web/.env.example
+

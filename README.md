@@ -6,7 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Android-8.0%2B-green.svg?style=flat-square)](https://github.com/priyanshuchawda/folio-pdf/releases)
 
-**Download latest APK:** [Releases →](https://github.com/priyanshuchawda/folio-pdf/releases/latest)
+**Download latest APK:** [Releases →](https://github.com/priyanshuchawda/folio-pdf/releases/latest)  
+**Website:** [folio-pdf.vercel.app](https://folio-pdf.vercel.app) (or the URL printed by `vercel`)
 
 ---
 
