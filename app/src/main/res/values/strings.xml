@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Folio</string>
+    <string name="app_tagline">Lite PDF for tablets</string>
+    <string name="open_pdf">Open PDF</string>
+    <string name="open_sample">Sample</string>
+    <string name="empty_library">No recent files.\nTap Open PDF to start reading.</string>
+    <string name="page_of">%1$d / %2$d</string>
+    <string name="page_resume">Resume page %1$d</string>
+    <string name="prev">Prev</string>
+    <string name="next">Next</string>
+    <string name="no_document">No document to open</string>
+    <string name="open_failed">Could not open PDF</string>
+    <string name="page_image">PDF page</string>
+</resources>

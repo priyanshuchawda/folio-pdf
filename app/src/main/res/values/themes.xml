@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PulsePdf" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/pulse_green</item>
+        <item name="colorPrimaryVariant">@color/pulse_green</item>
+        <item name="colorOnPrimary">@color/pulse_paper</item>
+        <item name="android:statusBarColor">@color/pulse_green</item>
+        <item name="android:navigationBarColor">@color/pulse_ink</item>
+        <item name="android:windowBackground">@color/pulse_paper</item>
+    </style>
+
+    <style name="Theme.PulsePdf.Reader" parent="Theme.PulsePdf">
+        <item name="android:windowBackground">@color/pulse_ink</item>
+        <item name="android:statusBarColor">@color/pulse_ink</item>
+    </style>
+</resources>

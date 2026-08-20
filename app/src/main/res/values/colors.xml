@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pulse_green">#1B3A2F</color>
+    <color name="pulse_paper">#F6F3EE</color>
+    <color name="pulse_ink">#111111</color>
+</resources>
