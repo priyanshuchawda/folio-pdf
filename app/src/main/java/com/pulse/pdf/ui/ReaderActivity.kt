@@ -9,8 +9,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.InputType
-import android.view.GestureDetector
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -56,7 +54,6 @@ class ReaderActivity : AppCompatActivity(),
     private val hideChromeRunnable = Runnable { setChromeVisible(false) }
     /** Ignore scroll-hide while load/nudge settles so chrome can auto-hide on a timer. */
     private var suppressScrollHideUntil = 0L
-    private lateinit var tapDetector: GestureDetector
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,30 +76,12 @@ class ReaderActivity : AppCompatActivity(),
         recents = RecentStore(this)
         window.attributes = window.attributes.apply { screenBrightness = 0.42f }
 
-        tapDetector = GestureDetector(
-            this,
-            object : GestureDetector.SimpleOnGestureListener() {
-                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                    wakeGuard.onUserInteraction()
-                    toggleChromeFromTap()
-                    return true
-                }
-            },
-        )
-        binding.pdfView.setOnTouchListener { _, event ->
-            tapDetector.onTouchEvent(event)
-            false
-        }
-
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.pageLabel.setOnClickListener {
             wakeGuard.onUserInteraction()
             cancelChromeAutoHide()
             showGoToPageDialog()
         }
-
-        // Start immersive; chrome shows briefly after load then auto-hides.
-        setChromeVisible(false)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -174,7 +153,12 @@ class ReaderActivity : AppCompatActivity(),
             .onPageChange(this)
             .onError(this)
             .onPageError(this)
-            .onTap { false } // chrome toggle handled by GestureDetector
+            .onTap {
+                // Library tap callback — more reliable than OnTouchListener (load() may replace it).
+                wakeGuard.onUserInteraction()
+                toggleChromeFromTap()
+                true
+            }
             .onPageScroll { _, _ ->
                 wakeGuard.onUserInteraction()
                 if (SystemClock.uptimeMillis() < suppressScrollHideUntil) return@onPageScroll
@@ -195,6 +179,7 @@ class ReaderActivity : AppCompatActivity(),
         suppressScrollHideUntil = SystemClock.uptimeMillis() + CHROME_HIDE_AFTER_LOAD_MS + 500
         setChromeVisible(true)
         scheduleChromeAutoHide(CHROME_HIDE_AFTER_LOAD_MS)
+        android.util.Log.i("Folio", "loadComplete pages=$nbPages chrome scheduled hide")
     }
 
     override fun onPageChanged(page: Int, pageCount: Int) {
@@ -305,7 +290,10 @@ class ReaderActivity : AppCompatActivity(),
         val v = if (visible) View.VISIBLE else View.GONE
         binding.topBar.visibility = v
         binding.bottomBar.visibility = v
+        binding.topBar.bringToFront()
+        binding.bottomBar.bringToFront()
         if (visible) exitImmersive() else enterImmersive()
+        android.util.Log.i("Folio", "chromeVisible=$visible topVis=${binding.topBar.visibility}")
     }
 
     private fun scheduleChromeAutoHide(delayMs: Long = CHROME_AUTO_HIDE_MS) {
