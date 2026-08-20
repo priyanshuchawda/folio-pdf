@@ -47,10 +47,11 @@ $ADB shell dumpsys meminfo "$PKG" | head -25
 RSS=$($ADB shell ps -A -o RSS,NAME | grep 'com.pulse.pdf' | awk '{s+=$1} END {print s+0}')
 echo "folio_rss_kb=$RSS"
 
-echo "== page next tap =="
-$ADB shell input tap 700 1100 || true
+echo "== page label tap (go-to) =="
+$ADB shell input tap 400 1180 || true
 sleep 1
 $ADB shell uiautomator dump /sdcard/folio_ui2.xml >/dev/null
 $ADB shell cat /sdcard/folio_ui2.xml | tr '>' '>\n' | grep -E 'text=|content-desc=' | head -20
+$ADB shell input keyevent KEYCODE_BACK || true
 
 echo "OK: Folio opened ReaderActivity"

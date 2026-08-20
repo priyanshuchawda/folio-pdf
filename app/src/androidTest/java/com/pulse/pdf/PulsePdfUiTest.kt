@@ -43,29 +43,26 @@ class PulsePdfUiTest {
         sample!!.click()
 
         // Reader should show page indicator
-        val page1 = device.wait(Until.findObject(By.textContains("/")), TIMEOUT)
+        val page1 = device.wait(Until.findObject(By.textContains("tap to go")), TIMEOUT)
         assertTrue("Page label missing", page1 != null)
 
-        // Next page via button
-        val next = device.wait(Until.findObject(By.text("Next")), TIMEOUT)
-        assertTrue(next != null)
-        next!!.click()
-        Thread.sleep(800)
+        // Go to page via label
+        page1!!.click()
+        val go = device.wait(Until.findObject(By.text("GO")), TIMEOUT)
+            ?: device.wait(Until.findObject(By.text("Go")), TIMEOUT)
+        assertTrue("Go-to-page dialog missing", go != null)
+        device.pressBack()
+        Thread.sleep(400)
 
-        // Swipe to next page
+        // Vertical swipe to next page
         device.swipe(
-            device.displayWidth * 3 / 4,
-            device.displayHeight / 2,
-            device.displayWidth / 4,
-            device.displayHeight / 2,
+            device.displayWidth / 2,
+            device.displayHeight * 3 / 4,
+            device.displayWidth / 2,
+            device.displayHeight / 4,
             20,
         )
         Thread.sleep(800)
-
-        // Prev
-        val prev = device.wait(Until.findObject(By.text("Prev")), TIMEOUT)
-        prev?.click()
-        Thread.sleep(500)
 
         assertTrue(device.findObject(By.pkg(PACKAGE)) != null)
     }

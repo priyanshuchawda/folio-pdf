@@ -12,8 +12,6 @@
     <string name="go_to_page_action">Go</string>
     <string name="go_to_page_invalid">Enter a page between 1 and %1$d</string>
     <string name="page_resume">Resume page %1$d</string>
-    <string name="prev">Prev</string>
-    <string name="next">Next</string>
     <string name="no_document">No document to open</string>
     <string name="open_failed">Could not open PDF</string>
     <string name="page_image">PDF page</string>

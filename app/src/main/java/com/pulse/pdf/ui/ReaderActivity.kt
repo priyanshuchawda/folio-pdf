@@ -70,14 +70,6 @@ class ReaderActivity : AppCompatActivity(),
         window.attributes = window.attributes.apply { screenBrightness = 0.42f }
 
         binding.toolbar.setNavigationOnClickListener { finish() }
-        binding.btnPrev.setOnClickListener {
-            wakeGuard.onUserInteraction()
-            if (currentPage > 0) binding.pdfView.jumpTo(currentPage - 1, true)
-        }
-        binding.btnNext.setOnClickListener {
-            wakeGuard.onUserInteraction()
-            if (currentPage < pageCount - 1) binding.pdfView.jumpTo(currentPage + 1, true)
-        }
         binding.pageLabel.setOnClickListener {
             wakeGuard.onUserInteraction()
             showGoToPageDialog()
@@ -190,8 +182,6 @@ class ReaderActivity : AppCompatActivity(),
 
     private fun updatePageLabel(position: Int) {
         binding.pageLabel.text = getString(R.string.page_of_hint, position + 1, pageCount)
-        binding.btnPrev.isEnabled = position > 0
-        binding.btnNext.isEnabled = position < pageCount - 1
     }
 
     /** Tap page number → type destination and jump (Drive-style). */
