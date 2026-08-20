@@ -9,6 +9,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.InputType
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -54,6 +56,7 @@ class ReaderActivity : AppCompatActivity(),
     private val hideChromeRunnable = Runnable { setChromeVisible(false) }
     /** Ignore scroll-hide while load/nudge settles so chrome can auto-hide on a timer. */
     private var suppressScrollHideUntil = 0L
+    private lateinit var tapDetector: GestureDetector
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,6 +79,21 @@ class ReaderActivity : AppCompatActivity(),
         recents = RecentStore(this)
         window.attributes = window.attributes.apply { screenBrightness = 0.42f }
 
+        tapDetector = GestureDetector(
+            this,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    wakeGuard.onUserInteraction()
+                    toggleChromeFromTap()
+                    return true
+                }
+            },
+        )
+        binding.pdfView.setOnTouchListener { _, event ->
+            tapDetector.onTouchEvent(event)
+            false
+        }
+
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.pageLabel.setOnClickListener {
             wakeGuard.onUserInteraction()
@@ -83,9 +101,13 @@ class ReaderActivity : AppCompatActivity(),
             showGoToPageDialog()
         }
 
+        // Start immersive; chrome shows briefly after load then auto-hides.
+        setChromeVisible(false)
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (!chromeVisible) {
+                    suppressScrollHideUntil = SystemClock.uptimeMillis() + 500
                     setChromeVisible(true)
                     scheduleChromeAutoHide()
                 } else {
@@ -120,6 +142,8 @@ class ReaderActivity : AppCompatActivity(),
         val startPage = recents.list().firstOrNull { it.uri == uri.toString() }?.lastPage ?: 0
 
         binding.loading.visibility = View.VISIBLE
+        // Block scroll-hide until the post-load auto-hide timer owns it.
+        suppressScrollHideUntil = SystemClock.uptimeMillis() + 60_000L
         // Prefer File for file:// (ContentResolver often hits EACCES on scoped storage).
         val loader = if (uri.scheme == "file") {
             val path = uri.path
@@ -150,17 +174,7 @@ class ReaderActivity : AppCompatActivity(),
             .onPageChange(this)
             .onError(this)
             .onPageError(this)
-            .onTap {
-                wakeGuard.onUserInteraction()
-                if (chromeVisible) {
-                    setChromeVisible(false)
-                } else {
-                    suppressScrollHideUntil = SystemClock.uptimeMillis() + 400
-                    setChromeVisible(true)
-                    scheduleChromeAutoHide()
-                }
-                true
-            }
+            .onTap { false } // chrome toggle handled by GestureDetector
             .onPageScroll { _, _ ->
                 wakeGuard.onUserInteraction()
                 if (SystemClock.uptimeMillis() < suppressScrollHideUntil) return@onPageScroll
@@ -174,11 +188,11 @@ class ReaderActivity : AppCompatActivity(),
         binding.loading.visibility = View.GONE
         updatePageLabel(binding.pdfView.currentPage)
         wakeGuard.onUserInteraction()
-        suppressScrollHideUntil = SystemClock.uptimeMillis() + 600
         // Nudge scrollbar so users see the Drive-style scrubber immediately
         binding.pdfView.post {
             binding.pdfView.setPositionOffset(binding.pdfView.positionOffset, true)
         }
+        suppressScrollHideUntil = SystemClock.uptimeMillis() + CHROME_HIDE_AFTER_LOAD_MS + 500
         setChromeVisible(true)
         scheduleChromeAutoHide(CHROME_HIDE_AFTER_LOAD_MS)
     }
@@ -273,6 +287,16 @@ class ReaderActivity : AppCompatActivity(),
         updatePageLabel(index)
         docUri?.let { recents.updatePage(it, index) }
         wakeGuard.onUserInteraction()
+    }
+
+    private fun toggleChromeFromTap() {
+        if (chromeVisible) {
+            setChromeVisible(false)
+        } else {
+            suppressScrollHideUntil = SystemClock.uptimeMillis() + 500
+            setChromeVisible(true)
+            scheduleChromeAutoHide()
+        }
     }
 
     private fun setChromeVisible(visible: Boolean) {
